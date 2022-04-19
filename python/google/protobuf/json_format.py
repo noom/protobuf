@@ -79,7 +79,7 @@ _VALID_EXTENSION_NAME = re.compile(r'\[[a-zA-Z0-9\._]*\]$')
 # protobuf
 # library.
 # Depending on an internal protobuf interface can hurt us since we are forking this file in noom-contracts, and the
-# version of the protobuf libary used on the client is under client's control.
+# version of the protobuf library used on the client is under client's control.
 # The other two imports in this file (descriptor and symbol_database) are part of the protobuf public interface, and
 # there is less risk that this will change under us.
 def TruncateToFourByteFloat(original):
