@@ -913,18 +913,21 @@ class JsonFormatTest(JsonFormatBase):
     message = json_format_proto3_pb2.TestMessage()
     text = '{"enumValue": "UNKNOWN_STRING_VALUE"}'
     json_format.Parse(text, message, ignore_unknown_fields=True)
+    # In proto3, there is no difference between the default value and 0.
+    self.assertEqual(message.enum_value, 0)
+
+  def testParseUnknownEnumStringValueProto2(self):
+    message = json_format_pb2.TestNumbers()
+    text = '{"a": "UNKNOWN_STRING_VALUE"}'
+    json_format.Parse(text, message, ignore_unknown_fields=True)
+    # In proto2 we can see that the field was not set at all.
+    self.assertFalse(message.HasField("a"))
 
   def testParseUnknownEnumStringValueRepeatedProto3(self):
     message = json_format_proto3_pb2.TestMessage()
     text = '{"repeatedEnumValue": ["UNKNOWN_STRING_VALUE", "FOO", "BAR"]}'
     json_format.Parse(text, message, ignore_unknown_fields=True)
     self.assertEquals(len(message.repeated_enum_value), 2)
-
-  def testParseUnknownEnumStringValueProto2(self):
-    message = json_format_pb2.TestNumbers()
-    text = '{"a": "UNKNOWN_STRING_VALUE"}'
-    json_format.Parse(text, message, ignore_unknown_fields=True)
-    self.assertFalse(message.HasField("a"))
 
   def testBytes(self):
     message = json_format_proto3_pb2.TestMessage()
