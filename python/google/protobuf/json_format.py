@@ -87,6 +87,33 @@ class ParseError(Error):
   """Thrown in case of parsing error."""
 
 
+class _UnknownEnumStringValueParseError(ParseError):
+  """Thrown if an unknown enum string value is encountered. This exception never leaks outside of the module."""
+
+
+class _MaybeSuppressUnknownEnumStringValueParseError():
+  """
+  Example usage:
+
+  with _MaybeSuppressUnknownEnumStringValueParseError(True):
+    ...
+
+  If should_suppress is True, the _UnknownEnumStringValueParseError will be ignored in the context body.
+  """
+  def __init__(self, should_suppress):
+    self.should_suppress = should_suppress
+
+  def __enter__(self):
+    pass
+
+  def __exit__(self, exc_type, exc_value, traceback):
+    # The return value from __exit__ indicates if any exception that occurred in the context body should be suppressed.
+    # We suppress _UnknownEnumStringValueParseError if should_suppress is set.
+    # See context manager docs:
+    # https://docs.python.org/3/reference/datamodel.html#with-statement-context-managers
+    return self.should_suppress and exc_type == _UnknownEnumStringValueParseError
+
+
 def MessageToJson(
     message,
     including_default_value_fields=False,
@@ -569,8 +596,9 @@ class _Parser(object):
               if item is None:
                 raise ParseError('null is not allowed to be used as an element'
                                  ' in a repeated field.')
-              getattr(message, field.name).append(
-                  _ConvertScalarFieldValue(item, field))
+              with _MaybeSuppressUnknownEnumStringValueParseError(self.ignore_unknown_fields):
+                getattr(message, field.name).append(
+                    _ConvertScalarFieldValue(item, field))
         elif field.cpp_type == descriptor.FieldDescriptor.CPPTYPE_MESSAGE:
           if field.is_extension:
             sub_message = message.Extensions[field]
@@ -579,10 +607,11 @@ class _Parser(object):
           sub_message.SetInParent()
           self.ConvertMessage(value, sub_message)
         else:
-          if field.is_extension:
-            message.Extensions[field] = _ConvertScalarFieldValue(value, field)
-          else:
-            setattr(message, field.name, _ConvertScalarFieldValue(value, field))
+          with _MaybeSuppressUnknownEnumStringValueParseError(self.ignore_unknown_fields):
+            if field.is_extension:
+              message.Extensions[field] = _ConvertScalarFieldValue(value, field)
+            else:
+              setattr(message, field.name, _ConvertScalarFieldValue(value, field))
       except ParseError as e:
         if field and field.containing_oneof is None:
           raise ParseError('Failed to parse {0} field: {1}.'.format(name, e))
@@ -669,7 +698,8 @@ class _Parser(object):
   def _ConvertWrapperMessage(self, value, message):
     """Convert a JSON representation into Wrapper message."""
     field = message.DESCRIPTOR.fields_by_name['value']
-    setattr(message, 'value', _ConvertScalarFieldValue(value, field))
+    with _MaybeSuppressUnknownEnumStringValueParseError(self.ignore_unknown_fields):
+      setattr(message, 'value', _ConvertScalarFieldValue(value, field))
 
   def _ConvertMapFieldValue(self, value, message, field):
     """Convert map field value for a message map field.
@@ -689,13 +719,15 @@ class _Parser(object):
     key_field = field.message_type.fields_by_name['key']
     value_field = field.message_type.fields_by_name['value']
     for key in value:
-      key_value = _ConvertScalarFieldValue(key, key_field, True)
+      with _MaybeSuppressUnknownEnumStringValueParseError(self.ignore_unknown_fields):
+        key_value = _ConvertScalarFieldValue(key, key_field, True)
       if value_field.cpp_type == descriptor.FieldDescriptor.CPPTYPE_MESSAGE:
         self.ConvertMessage(value[key], getattr(
             message, field.name)[key_value])
       else:
-        getattr(message, field.name)[key_value] = _ConvertScalarFieldValue(
-            value[key], value_field)
+        with _MaybeSuppressUnknownEnumStringValueParseError(self.ignore_unknown_fields):
+          getattr(message, field.name)[key_value] = _ConvertScalarFieldValue(
+              value[key], value_field)
 
 
 def _ConvertScalarFieldValue(value, field, require_str=False):
@@ -711,6 +743,7 @@ def _ConvertScalarFieldValue(value, field, require_str=False):
 
   Raises:
     ParseError: In case of convert problems.
+    _UnknownEnumStringValueParseError: If unknown enum string value is encountered during parsing.
   """
   if field.cpp_type in _INT_TYPES:
     return _ConvertInteger(value)
@@ -741,7 +774,9 @@ def _ConvertScalarFieldValue(value, field, require_str=False):
         number = int(value)
         enum_value = field.enum_type.values_by_number.get(number, None)
       except ValueError:
-        raise ParseError('Invalid enum value {0} for enum type {1}.'.format(
+        # The ValueError will be raised by the conversion to int.
+        # That means that here we know that we have an unknown enum string value.
+        raise _UnknownEnumStringValueParseError('Invalid enum value {0} for enum type {1}.'.format(
             value, field.enum_type.full_name))
       if enum_value is None:
         if field.file.syntax == 'proto3':

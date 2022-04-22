@@ -909,6 +909,23 @@ class JsonFormatTest(JsonFormatBase):
         'for enum type protobuf_unittest.TestAllTypes.NestedEnum.',
         json_format.Parse, '{"optionalNestedEnum": 12345}', message)
 
+  def testParseUnknownEnumStringValueProto3(self):
+    message = json_format_proto3_pb2.TestMessage()
+    text = '{"enumValue": "UNKNOWN_STRING_VALUE"}'
+    json_format.Parse(text, message, ignore_unknown_fields=True)
+
+  def testParseUnknownEnumStringValueRepeatedProto3(self):
+    message = json_format_proto3_pb2.TestMessage()
+    text = '{"repeatedEnumValue": ["UNKNOWN_STRING_VALUE", "FOO", "BAR"]}'
+    json_format.Parse(text, message, ignore_unknown_fields=True)
+    self.assertEquals(len(message.repeated_enum_value), 2)
+
+  def testParseUnknownEnumStringValueProto2(self):
+    message = json_format_pb2.TestNumbers()
+    text = '{"a": "UNKNOWN_STRING_VALUE"}'
+    json_format.Parse(text, message, ignore_unknown_fields=True)
+    self.assertFalse(message.HasField("a"))
+
   def testBytes(self):
     message = json_format_proto3_pb2.TestMessage()
     # Test url base64
