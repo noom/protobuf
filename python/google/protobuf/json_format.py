@@ -43,6 +43,7 @@ Simple usage example:
 __author__ = 'jieluo@google.com (Jie Luo)'
 
 
+import ctypes
 import base64
 from collections import OrderedDict
 import json
@@ -51,7 +52,6 @@ from operator import methodcaller
 import re
 import sys
 
-from google.protobuf.internal import type_checkers
 from google.protobuf import descriptor
 from google.protobuf import symbol_database
 
@@ -73,6 +73,37 @@ _UNPAIRED_SURROGATE_PATTERN = re.compile(
     u'[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]')
 
 _VALID_EXTENSION_NAME = re.compile(r'\[[a-zA-Z0-9\._]*\]$')
+
+
+# NOTE(anton): copied from internal/type_checkers.py to avoid having json_format.py depend on internal interface of the
+# protobuf
+# library.
+# Depending on an internal protobuf interface can hurt us since we are forking this file in noom-contracts, and the
+# version of the protobuf library used on the client is under client's control.
+# The other two imports in this file (descriptor and symbol_database) are part of the protobuf public interface, and
+# there is less risk that this will change under us.
+def TruncateToFourByteFloat(original):
+  return ctypes.c_float(original).value
+
+
+# NOTE(anton): same comment from above TruncateToFourByteFloat applies here.
+def ToShortestFloat(original):
+  """Returns the shortest float that has same value in wire."""
+  # All 4 byte floats have between 6 and 9 significant digits, so we
+  # start with 6 as the lower bound.
+  # It has to be iterative because use '.9g' directly can not get rid
+  # of the noises for most values. For example if set a float_field=0.9
+  # use '.9g' will print 0.899999976.
+  precision = 6
+  rounded = float('{0:.{1}g}'.format(original, precision))
+  while TruncateToFourByteFloat(rounded) != original:
+    precision += 1
+    rounded = float('{0:.{1}g}'.format(original, precision))
+  return rounded
+
+# NOTE(anton): same comment from above TruncateToFourByteFloat applies here.
+_FLOAT_MAX = float.fromhex('0x1.fffffep+127')
+_FLOAT_MIN = -_FLOAT_MAX
 
 
 class Error(Exception):
@@ -335,7 +366,7 @@ class _Printer(object):
         if self.float_format:
           return float(format(value, self.float_format))
         else:
-          return type_checkers.ToShortestFloat(value)
+          return ToShortestFloat(value)
 
     return value
 
@@ -826,10 +857,10 @@ def _ConvertFloat(value, field):
                          'use quoted "-Infinity" instead.')
     if field.cpp_type == descriptor.FieldDescriptor.CPPTYPE_FLOAT:
       # pylint: disable=protected-access
-      if value > type_checkers._FLOAT_MAX:
+      if value > _FLOAT_MAX:
         raise ParseError('Float value too large')
       # pylint: disable=protected-access
-      if value < type_checkers._FLOAT_MIN:
+      if value < _FLOAT_MIN:
         raise ParseError('Float value too small')
   if value == 'nan':
     raise ParseError('Couldn\'t parse float "nan", use "NaN" instead.')
