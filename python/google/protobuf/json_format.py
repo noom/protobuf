@@ -130,6 +130,12 @@ class _MaybeSuppressUnknownEnumStringValueParseError():
     ...
 
   If should_suppress is True, the _UnknownEnumStringValueParseError will be ignored in the context body.
+
+  The motivation for the context manager is to avoid a bigger refactor that would enable _ConvertScalarFieldValue to
+  signal to the caller that the field should be ignored.
+
+  We want to avoid a bigger refactor because we are maintaining a fork and we want changes to be minimal to simplify
+  merging with upstream.
   """
   def __init__(self, should_suppress):
     self.should_suppress = should_suppress
