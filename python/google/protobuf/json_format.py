@@ -117,7 +117,7 @@ class ParseError(Error):
 
 
 class _UnknownEnumStringValueParseError(ParseError):
-  """Thrown if an unknown enum string value is encountered. This exception never leaks outside of the module."""
+  """Thrown if an unknown enum string value is encountered."""
 
 
 class _MaybeSuppressUnknownEnumStringValueParseError():
