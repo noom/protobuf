@@ -76,8 +76,7 @@ _VALID_EXTENSION_NAME = re.compile(r'\[[a-zA-Z0-9\._]*\]$')
 
 
 # NOTE(anton): copied from internal/type_checkers.py to avoid having json_format.py depend on internal interface of the
-# protobuf
-# library.
+# protobuf library.
 # Depending on an internal protobuf interface can hurt us since we are forking this file in noom-contracts, and the
 # version of the protobuf library used on the client is under client's control.
 # The other two imports in this file (descriptor and symbol_database) are part of the protobuf public interface, and
@@ -104,7 +103,6 @@ def ToShortestFloat(original):
 # NOTE(anton): same comment from above TruncateToFourByteFloat applies here.
 _FLOAT_MAX = float.fromhex('0x1.fffffep+127')
 _FLOAT_MIN = -_FLOAT_MAX
-
 
 class Error(Exception):
   """Top-level module error for json_format."""
