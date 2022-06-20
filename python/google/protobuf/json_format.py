@@ -123,6 +123,12 @@ class _UnknownEnumStringValueParseError(ParseError):
 
 @contextmanager
 def _MaybeSuppressUnknownEnumStringValueParseError(should_suppress: bool):
+    """
+    This context manager will suppress _UnknownEnumStringValueParseError if the should_suppress is set to true. Usage:
+
+    with _MaybeSuppressUnknownEnumStringValueParseError(True):
+        run_some_code_that_might_throw()
+    """
     try:
         yield
     except _UnknownEnumStringValueParseError as ex:
