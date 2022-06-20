@@ -51,6 +51,7 @@ import math
 from operator import methodcaller
 import re
 import sys
+from contextlib import contextmanager
 
 from google.protobuf import descriptor
 from google.protobuf import symbol_database
@@ -120,33 +121,16 @@ class _UnknownEnumStringValueParseError(ParseError):
   """Thrown if an unknown enum string value is encountered."""
 
 
-class _MaybeSuppressUnknownEnumStringValueParseError():
-  """
-  Example usage:
-
-  with _MaybeSuppressUnknownEnumStringValueParseError(True):
-    ...
-
-  If should_suppress is True, the _UnknownEnumStringValueParseError will be ignored in the context body.
-
-  The motivation for the context manager is to avoid a bigger refactor that would enable _ConvertScalarFieldValue to
-  signal to the caller that the field should be ignored.
-
-  We want to avoid a bigger refactor because we are maintaining a fork and we want changes to be minimal to simplify
-  merging with upstream.
-  """
-  def __init__(self, should_suppress):
-    self.should_suppress = should_suppress
-
-  def __enter__(self):
-    pass
-
-  def __exit__(self, exc_type, exc_value, traceback):
-    # The return value from __exit__ indicates if any exception that occurred in the context body should be suppressed.
-    # We suppress _UnknownEnumStringValueParseError if should_suppress is set.
-    # See context manager docs:
-    # https://docs.python.org/3/reference/datamodel.html#with-statement-context-managers
-    return self.should_suppress and exc_type == _UnknownEnumStringValueParseError
+@contextmanager
+def _MaybeSuppressUnknownEnumStringValueParseError(should_suppress: bool):
+    try:
+        yield
+    except _UnknownEnumStringValueParseError as ex:
+        if should_suppress:
+            # Here we suppress _UnknownEnumStringValueParseError.
+            pass
+        else:
+            raise
 
 
 def MessageToJson(
