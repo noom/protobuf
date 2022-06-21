@@ -909,6 +909,41 @@ class JsonFormatTest(JsonFormatBase):
         'for enum type protobuf_unittest.TestAllTypes.NestedEnum.',
         json_format.Parse, '{"optionalNestedEnum": 12345}', message)
 
+  def testParseUnknownEnumStringValueProto2(self):
+    message = json_format_pb2.TestNumbers()
+    # Note that in src/google/protobuf/util/json_format.proto::TestNumbers
+    # has a field 'optional MyType a = 1', which is different
+    # from the test below that are using
+    # src/google/protobuf/util/json_format_proto3.proto::TestMessage.
+    text = '{"a": "UNKNOWN_STRING_VALUE"}'
+    json_format.Parse(text, message, ignore_unknown_fields=True)
+    # In proto2 we can see that the field was not set at all.
+    self.assertFalse(message.HasField("a"))
+
+  def testParseErrorCorrectCatchForUnknownEnumValue(self):
+    message = json_format_pb2.TestNumbers()
+    self.assertRaisesRegexp(
+        json_format.ParseError,
+        'Invalid enum value',
+        json_format.Parse, '{"a": "UNKNOWN_STRING_VALUE"}', message)
+
+  def testParseUnknownEnumStringValueProto3(self):
+    message = json_format_proto3_pb2.TestMessage()
+    text = '{"enumValue": "UNKNOWN_STRING_VALUE"}'
+    json_format.Parse(text, message, ignore_unknown_fields=True)
+    # In proto3, there is no difference between the default value and 0.
+    self.assertEqual(message.enum_value, 0)
+
+  # Note that in noom-contracts we banned the repeated enum fields, so this test
+  # is not adding value for Noom's use of this library.
+  # Still, we are testing that the behavior here is consistent with what
+  # binary serialization would do.
+  def testParseUnknownEnumStringValueRepeatedProto3(self):
+    message = json_format_proto3_pb2.TestMessage()
+    text = '{"repeatedEnumValue": ["UNKNOWN_STRING_VALUE", "FOO", "BAR"]}'
+    json_format.Parse(text, message, ignore_unknown_fields=True)
+    self.assertEquals(len(message.repeated_enum_value), 2)
+
   def testBytes(self):
     message = json_format_proto3_pb2.TestMessage()
     # Test url base64
