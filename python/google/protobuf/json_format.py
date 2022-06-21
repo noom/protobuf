@@ -118,7 +118,10 @@ class ParseError(Error):
 
 
 class _UnknownEnumStringValueParseError(ParseError):
-  """Thrown if an unknown enum string value is encountered."""
+  """
+  Thrown if an unknown enum string value is encountered.
+  We inherit ParseError to avoid breaking the code that might expect ParseError.
+  """
 
 
 @contextmanager
