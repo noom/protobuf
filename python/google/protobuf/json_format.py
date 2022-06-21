@@ -43,6 +43,7 @@ Simple usage example:
 __author__ = 'jieluo@google.com (Jie Luo)'
 
 
+import ctypes
 import base64
 from collections import OrderedDict
 import json
@@ -50,8 +51,8 @@ import math
 from operator import methodcaller
 import re
 import sys
+from contextlib import contextmanager
 
-from google.protobuf.internal import type_checkers
 from google.protobuf import descriptor
 from google.protobuf import symbol_database
 
@@ -75,6 +76,35 @@ _UNPAIRED_SURROGATE_PATTERN = re.compile(
 _VALID_EXTENSION_NAME = re.compile(r'\[[a-zA-Z0-9\._]*\]$')
 
 
+# NOTE(anton): copied from internal/type_checkers.py to avoid having json_format.py depend on internal interface of the
+# protobuf library.
+# Depending on an internal protobuf interface can hurt us since we are forking this file in noom-contracts, and the
+# version of the protobuf library used on the client is under client's control.
+# The other two imports in this file (descriptor and symbol_database) are part of the protobuf public interface, and
+# there is less risk that this will change under us.
+def TruncateToFourByteFloat(original):
+  return ctypes.c_float(original).value
+
+
+# NOTE(anton): same comment from above TruncateToFourByteFloat applies here.
+def ToShortestFloat(original):
+  """Returns the shortest float that has same value in wire."""
+  # All 4 byte floats have between 6 and 9 significant digits, so we
+  # start with 6 as the lower bound.
+  # It has to be iterative because use '.9g' directly can not get rid
+  # of the noises for most values. For example if set a float_field=0.9
+  # use '.9g' will print 0.899999976.
+  precision = 6
+  rounded = float('{0:.{1}g}'.format(original, precision))
+  while TruncateToFourByteFloat(rounded) != original:
+    precision += 1
+    rounded = float('{0:.{1}g}'.format(original, precision))
+  return rounded
+
+# NOTE(anton): same comment from above TruncateToFourByteFloat applies here.
+_FLOAT_MAX = float.fromhex('0x1.fffffep+127')
+_FLOAT_MIN = -_FLOAT_MAX
+
 class Error(Exception):
   """Top-level module error for json_format."""
 
@@ -85,6 +115,31 @@ class SerializeToJsonError(Error):
 
 class ParseError(Error):
   """Thrown in case of parsing error."""
+
+
+class _UnknownEnumStringValueParseError(ParseError):
+  """
+  Thrown if an unknown enum string value is encountered.
+  We inherit ParseError to avoid breaking the code that might expect ParseError.
+  """
+
+
+@contextmanager
+def _MaybeSuppressUnknownEnumStringValueParseError(should_suppress: bool):
+    """
+    This context manager will suppress _UnknownEnumStringValueParseError if the should_suppress is set to true. Usage:
+
+    with _MaybeSuppressUnknownEnumStringValueParseError(True):
+        run_some_code_that_might_throw()
+    """
+    try:
+        yield
+    except _UnknownEnumStringValueParseError as ex:
+        if should_suppress:
+            # Here we suppress _UnknownEnumStringValueParseError.
+            pass
+        else:
+            raise
 
 
 def MessageToJson(
@@ -308,7 +363,7 @@ class _Printer(object):
         if self.float_format:
           return float(format(value, self.float_format))
         else:
-          return type_checkers.ToShortestFloat(value)
+          return ToShortestFloat(value)
 
     return value
 
@@ -569,8 +624,9 @@ class _Parser(object):
               if item is None:
                 raise ParseError('null is not allowed to be used as an element'
                                  ' in a repeated field.')
-              getattr(message, field.name).append(
-                  _ConvertScalarFieldValue(item, field))
+              with _MaybeSuppressUnknownEnumStringValueParseError(self.ignore_unknown_fields):
+                getattr(message, field.name).append(
+                    _ConvertScalarFieldValue(item, field))
         elif field.cpp_type == descriptor.FieldDescriptor.CPPTYPE_MESSAGE:
           if field.is_extension:
             sub_message = message.Extensions[field]
@@ -579,10 +635,11 @@ class _Parser(object):
           sub_message.SetInParent()
           self.ConvertMessage(value, sub_message)
         else:
-          if field.is_extension:
-            message.Extensions[field] = _ConvertScalarFieldValue(value, field)
-          else:
-            setattr(message, field.name, _ConvertScalarFieldValue(value, field))
+          with _MaybeSuppressUnknownEnumStringValueParseError(self.ignore_unknown_fields):
+            if field.is_extension:
+              message.Extensions[field] = _ConvertScalarFieldValue(value, field)
+            else:
+              setattr(message, field.name, _ConvertScalarFieldValue(value, field))
       except ParseError as e:
         if field and field.containing_oneof is None:
           raise ParseError('Failed to parse {0} field: {1}.'.format(name, e))
@@ -669,7 +726,8 @@ class _Parser(object):
   def _ConvertWrapperMessage(self, value, message):
     """Convert a JSON representation into Wrapper message."""
     field = message.DESCRIPTOR.fields_by_name['value']
-    setattr(message, 'value', _ConvertScalarFieldValue(value, field))
+    with _MaybeSuppressUnknownEnumStringValueParseError(self.ignore_unknown_fields):
+      setattr(message, 'value', _ConvertScalarFieldValue(value, field))
 
   def _ConvertMapFieldValue(self, value, message, field):
     """Convert map field value for a message map field.
@@ -689,13 +747,15 @@ class _Parser(object):
     key_field = field.message_type.fields_by_name['key']
     value_field = field.message_type.fields_by_name['value']
     for key in value:
-      key_value = _ConvertScalarFieldValue(key, key_field, True)
+      with _MaybeSuppressUnknownEnumStringValueParseError(self.ignore_unknown_fields):
+        key_value = _ConvertScalarFieldValue(key, key_field, True)
       if value_field.cpp_type == descriptor.FieldDescriptor.CPPTYPE_MESSAGE:
         self.ConvertMessage(value[key], getattr(
             message, field.name)[key_value])
       else:
-        getattr(message, field.name)[key_value] = _ConvertScalarFieldValue(
-            value[key], value_field)
+        with _MaybeSuppressUnknownEnumStringValueParseError(self.ignore_unknown_fields):
+          getattr(message, field.name)[key_value] = _ConvertScalarFieldValue(
+              value[key], value_field)
 
 
 def _ConvertScalarFieldValue(value, field, require_str=False):
@@ -711,6 +771,7 @@ def _ConvertScalarFieldValue(value, field, require_str=False):
 
   Raises:
     ParseError: In case of convert problems.
+    _UnknownEnumStringValueParseError: If unknown enum string value is encountered during parsing.
   """
   if field.cpp_type in _INT_TYPES:
     return _ConvertInteger(value)
@@ -741,7 +802,9 @@ def _ConvertScalarFieldValue(value, field, require_str=False):
         number = int(value)
         enum_value = field.enum_type.values_by_number.get(number, None)
       except ValueError:
-        raise ParseError('Invalid enum value {0} for enum type {1}.'.format(
+        # The ValueError will be raised by the conversion to int.
+        # That means that here we know that we have an unknown enum string value.
+        raise _UnknownEnumStringValueParseError('Invalid enum value {0} for enum type {1}.'.format(
             value, field.enum_type.full_name))
       if enum_value is None:
         if field.file.syntax == 'proto3':
@@ -791,10 +854,10 @@ def _ConvertFloat(value, field):
                          'use quoted "-Infinity" instead.')
     if field.cpp_type == descriptor.FieldDescriptor.CPPTYPE_FLOAT:
       # pylint: disable=protected-access
-      if value > type_checkers._FLOAT_MAX:
+      if value > _FLOAT_MAX:
         raise ParseError('Float value too large')
       # pylint: disable=protected-access
-      if value < type_checkers._FLOAT_MIN:
+      if value < _FLOAT_MIN:
         raise ParseError('Float value too small')
   if value == 'nan':
     raise ParseError('Couldn\'t parse float "nan", use "NaN" instead.')
