@@ -1281,5 +1281,17 @@ class JsonFormatTest(JsonFormatBase):
     json_format.Parse('{"payload": {}, "child": {"child":{}}}',
                       message, max_recursion_depth=3)
 
+  def testIncludingDefaultValues(self):
+    message = json_format_proto3_pb2.TestMessage()
+    js_dict = json_format.MessageToDict(message, including_default_value_fields=True)
+    self.assertFalse("messageValue" in js_dict)
+    self.assertTrue("int32Value" in js_dict)
+
+  def testIncludingDefaultValuesWrapper(self):
+    message = json_format_proto3_pb2.TestWrapper()
+    js_dict = json_format.MessageToDict(message, including_default_value_fields=True)
+    self.assertFalse("stringValue" in js_dict)
+    self.assertTrue("repeatedStringValue" in js_dict)
+
 if __name__ == '__main__':
   unittest.main()
