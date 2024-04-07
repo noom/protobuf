@@ -507,6 +507,38 @@ TEST_P(JsonTest, ParseMap) {
   EXPECT_EQ(other->DebugString(), message.DebugString());
 }
 
+TEST_P(JsonTest, ParseMapWithEnumValuesProto2) {
+  ParseOptions options;
+  options.ignore_unknown_fields = true;
+  protobuf_unittest::TestMapOfEnums message;
+  ASSERT_OK(ToProto(message, R"json({
+    "enum_map": {
+      "key1": "PROTOCOL",
+      "key2": "UNKNOWN_ENUM_STRING_VALUE",
+      "key3": "BUFFER",
+      "key4": "UNKNOWN_ENUM_STRING_VALUE",
+      "key5": "PROTOCOL",
+    }
+  })json", options));
+  //std::cerr << message.DebugString() << std::endl;
+}
+
+TEST_P(JsonTest, ParseMapWithEnumValuesProto3) {
+  ParseOptions options;
+  options.ignore_unknown_fields = true;
+  proto3::MapOfEnums message;
+  ASSERT_OK(ToProto(message, R"json({
+    "map": {
+      "key1": "FOO",
+      "key2": "UNKNOWN_ENUM_STRING_VALUE",
+      "key3": "BAR",
+      "key4": "UNKNOWN_ENUM_STRING_VALUE",
+      "key5": "FOO",
+    }
+  })json", options));
+  //std::cerr << message.DebugString() << std::endl;
+}
+
 TEST_P(JsonTest, RepeatedMapKey) {
   EXPECT_THAT(ToProto<TestMap>(R"json({
     "string_map": {

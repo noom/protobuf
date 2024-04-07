@@ -241,6 +241,18 @@ struct Proto2Descriptor {
 
   static bool IsMap(Field f) { return f->is_map(); }
 
+  static bool IsMapOfEnums(Field f) {
+    if (!IsMap(f)) {
+      return false;
+    }
+    bool result = false;
+    (void)WithFieldType(f, [&result](const Desc& desc) {
+      result = FieldType(ValueField(desc)) == FieldDescriptor::TYPE_ENUM;
+      return absl::OkStatus();
+    });
+    return result;
+  }
+
   static bool IsRepeated(Field f) { return f->is_repeated(); }
 
   static bool IsExplicitPresence(Field f) { return f->has_presence(); }
@@ -423,6 +435,18 @@ struct Proto3Type {
       return absl::OkStatus();
     });
     return value;
+  }
+
+  static bool IsMapOfEnums(Field f) {
+    if (!IsMap(f)) {
+      return false;
+    }
+    bool result = false;
+    (void)WithFieldType(f, [&result](const Desc& desc) {
+      result = FieldType(ValueField(desc)) == FieldDescriptor::TYPE_ENUM;
+      return absl::OkStatus();
+    });
+    return result;
   }
 
   static bool IsRepeated(Field f) {

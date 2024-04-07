@@ -626,6 +626,7 @@ absl::Status ParseArray(JsonLexer& lex, Field<Traits> field, Msg<Traits>& msg) {
 }
 
 // TODO(anton): explain all these parameters.
+// TODO on zapravo ne treba dobiti lex.
 template <typename Traits>
 absl::Status ParseMapKey(
   JsonLexer& lex,
@@ -708,7 +709,7 @@ absl::Status ParseMapKey(
 }
 
 template <typename Traits>
-absl::Status ParseMap(JsonLexer& lex, Field<Traits> field, Msg<Traits>& msg) {
+absl::Status ParseMapDefault(JsonLexer& lex, Field<Traits> field, Msg<Traits>& msg) {
   if (lex.Peek(JsonLexer::kNull)) {
     return lex.Expect("null");
   }
@@ -733,6 +734,43 @@ absl::Status ParseMap(JsonLexer& lex, Field<Traits> field, Msg<Traits>& msg) {
                                            entry);
             });
       });
+}
+
+template <typename Traits>
+absl::Status ParseMapOfEnums(JsonLexer& lex, Field<Traits> field, Msg<Traits>& msg) {
+  if (lex.Peek(JsonLexer::kNull)) {
+    return lex.Expect("null");
+  }
+
+  absl::flat_hash_set<std::string> keys_seen;
+  return lex.VisitObject(
+      [&](LocationWith<MaybeOwnedString>& key) -> absl::Status {
+        lex.path().NextRepeated();
+        auto insert_result = keys_seen.emplace(key.value.AsView());
+        if (!insert_result.second) {
+          return key.loc.Invalid(absl::StrFormat(
+              "got unexpectedly-repeated repeated map key: '%s'",
+              key.value.AsView()));
+        }
+
+        return Traits::NewMsg(
+            field, msg,
+            [&](const Desc<Traits>& type, Msg<Traits>& entry) -> absl::Status {
+              RETURN_IF_ERROR(ParseMapKey<Traits>(lex, field, type, key, entry));
+
+              return ParseSingular<Traits>(lex, Traits::ValueField(type),
+                                           entry);
+            });
+      });
+}
+
+template <typename Traits>
+absl::Status ParseMap(JsonLexer& lex, Field<Traits> field, Msg<Traits>& msg) {
+  if (Traits::IsMapOfEnums(field)) {
+    return ParseMapOfEnums<Traits>(lex, field, msg);
+  } else {
+    return ParseMapDefault<Traits>(lex, field, msg);
+  }
 }
 
 absl::optional<uint32_t> TakeTimeDigitsWithSuffixAndAdvance(

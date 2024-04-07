@@ -1,3 +1,22 @@
+Anton's notes
+=============
+
+Run a single test:
+```shell
+bazel test //src/google/protobuf/json:json_test --test_filter=JsonTestSuite/JsonTest.ParseMapWithEnumValues*/0 --test_output=streamed
+
+```
+Debug output:
+```cpp
+std::cerr << "bok\n";
+```
+
+- DONE write unit test which uses map of enums
+- DONE detect map of enums and invoke a different impl for parsemap
+- implement ParseMapOfEnums
+- don't take the whole lex in ParseEnumFromStr, only options.
+- ParseMapKey shouldn't take lex
+
 Protocol Buffers - Google's data interchange format
 ===================================================
 
