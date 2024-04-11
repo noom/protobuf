@@ -509,6 +509,40 @@ TEST_P(JsonTest, ParseMap) {
 
 TEST_P(JsonTest, ParseMapWithEnumValuesProto2) {
   ParseOptions options;
+  options.ignore_unknown_fields = false;
+  protobuf_unittest::TestMapOfEnums message;
+  EXPECT_THAT(ToProto(message, R"json({
+    "enum_map": {
+      "key1": "PROTOCOL",
+      "key2": "UNKNOWN_ENUM_STRING_VALUE",
+      "key3": "BUFFER",
+      "key4": "UNKNOWN_ENUM_STRING_VALUE",
+      "key5": "PROTOCOL",
+    }
+  })json", options),
+    StatusIs(absl::StatusCode::kInvalidArgument)
+  );
+}
+
+TEST_P(JsonTest, ParseMapWithEnumValuesProto3) {
+  ParseOptions options;
+  options.ignore_unknown_fields = false;
+  proto3::MapOfEnums message;
+  EXPECT_THAT(ToProto(message, R"json({
+    "map": {
+      "key1": "FOO",
+      "key2": "UNKNOWN_ENUM_STRING_VALUE",
+      "key3": "BAR",
+      "key4": "UNKNOWN_ENUM_STRING_VALUE",
+      "key5": "FOO",
+    }
+  })json", options),
+    StatusIs(absl::StatusCode::kInvalidArgument)
+  );
+}
+
+TEST_P(JsonTest, ParseMapWithEnumValuesProto2WithUnknownFields) {
+  ParseOptions options;
   options.ignore_unknown_fields = true;
   protobuf_unittest::TestMapOfEnums message;
   ASSERT_OK(ToProto(message, R"json({
@@ -520,10 +554,12 @@ TEST_P(JsonTest, ParseMapWithEnumValuesProto2) {
       "key5": "PROTOCOL",
     }
   })json", options));
-  //std::cerr << message.DebugString() << std::endl;
+  EXPECT_EQ(message.enum_map().size(), 3);
+  EXPECT_EQ(message.enum_map().contains("key2"), false);
+  EXPECT_EQ(message.enum_map().contains("key4"), false);
 }
 
-TEST_P(JsonTest, ParseMapWithEnumValuesProto3) {
+TEST_P(JsonTest, ParseMapWithEnumValuesProto3WithUnknownFields) {
   ParseOptions options;
   options.ignore_unknown_fields = true;
   proto3::MapOfEnums message;
@@ -536,7 +572,9 @@ TEST_P(JsonTest, ParseMapWithEnumValuesProto3) {
       "key5": "FOO",
     }
   })json", options));
-  //std::cerr << message.DebugString() << std::endl;
+  EXPECT_EQ(message.map().size(), 3);
+  EXPECT_EQ(message.map().contains("key2"), false);
+  EXPECT_EQ(message.map().contains("key4"), false);
 }
 
 TEST_P(JsonTest, RepeatedMapKey) {

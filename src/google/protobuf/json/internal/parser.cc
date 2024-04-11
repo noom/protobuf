@@ -322,11 +322,11 @@ absl::StatusOr<std::string> ParseStrOrBytes(JsonLexer& lex,
 }
 
 template <typename Traits>
-absl::StatusOr<absl::optional<int32_t>> ParseEnumFromStr(JsonLexer& lex,
+absl::StatusOr<absl::optional<int32_t>> ParseEnumFromStr(const json_internal::ParseOptions& options,
                                                          MaybeOwnedString& str,
                                                          Field<Traits> field) {
   absl::StatusOr<int32_t> value = Traits::EnumNumberByName(
-      field, str.AsView(), lex.options().case_insensitive_enum_parsing);
+      field, str.AsView(), options.case_insensitive_enum_parsing);
   if (value.ok()) {
     return absl::optional<int32_t>(*value);
   }
@@ -334,7 +334,7 @@ absl::StatusOr<absl::optional<int32_t>> ParseEnumFromStr(JsonLexer& lex,
   int32_t i;
   if (absl::SimpleAtoi(str.AsView(), &i)) {
     return absl::optional<int32_t>(i);
-  } else if (lex.options().ignore_unknown_fields) {
+  } else if (options.ignore_unknown_fields) {
     return {absl::nullopt};
   }
 
@@ -355,7 +355,7 @@ absl::StatusOr<absl::optional<int32_t>> ParseEnum(JsonLexer& lex,
       absl::StatusOr<LocationWith<MaybeOwnedString>> str = lex.ParseUtf8();
       RETURN_IF_ERROR(str.status());
 
-      auto e = ParseEnumFromStr<Traits>(lex, str->value, field);
+      auto e = ParseEnumFromStr<Traits>(lex.options(), str->value, field);
       RETURN_IF_ERROR(e.status());
       if (!e->has_value()) {
         return {absl::nullopt};
@@ -626,14 +626,13 @@ absl::Status ParseArray(JsonLexer& lex, Field<Traits> field, Msg<Traits>& msg) {
 }
 
 // TODO(anton): explain all these parameters.
-// TODO on zapravo ne treba dobiti lex.
 template <typename Traits>
 absl::Status ParseMapKey(
-  JsonLexer& lex,
+  const json_internal::ParseOptions& options,
   Field<Traits> field,
   const Desc<Traits>& type,
-  LocationWith<MaybeOwnedString>& key,
-  Msg<Traits>& entry
+  Msg<Traits>& entry,
+  LocationWith<MaybeOwnedString>& key
 ) {
   auto key_field = Traits::KeyField(type);
   switch (Traits::FieldType(key_field)) {
@@ -692,7 +691,7 @@ absl::Status ParseMapKey(
     }
     case FieldDescriptor::TYPE_ENUM: {
       MaybeOwnedString key_str = key.value;
-      auto e = ParseEnumFromStr<Traits>(lex, key_str, field);
+      auto e = ParseEnumFromStr<Traits>(options, key_str, field);
       RETURN_IF_ERROR(e.status());
       Traits::SetEnum(key_field, entry, e->value_or(0));
       break;
@@ -703,13 +702,13 @@ absl::Status ParseMapKey(
       break;
     }
     default:
-      return lex.Invalid("unsupported map key type");
+      return key.loc.Invalid("unsupported map key type");
   }
   return absl::OkStatus();
 }
 
 template <typename Traits>
-absl::Status ParseMapDefault(JsonLexer& lex, Field<Traits> field, Msg<Traits>& msg) {
+absl::Status ParseMapImpl(JsonLexer& lex, Field<Traits> field, Msg<Traits>& msg) {
   if (lex.Peek(JsonLexer::kNull)) {
     return lex.Expect("null");
   }
@@ -728,7 +727,7 @@ absl::Status ParseMapDefault(JsonLexer& lex, Field<Traits> field, Msg<Traits>& m
         return Traits::NewMsg(
             field, msg,
             [&](const Desc<Traits>& type, Msg<Traits>& entry) -> absl::Status {
-              RETURN_IF_ERROR(ParseMapKey<Traits>(lex, field, type, key, entry));
+              RETURN_IF_ERROR(ParseMapKey<Traits>(lex.options(), field, type, entry, key));
 
               return ParseSingular<Traits>(lex, Traits::ValueField(type),
                                            entry);
@@ -737,7 +736,7 @@ absl::Status ParseMapDefault(JsonLexer& lex, Field<Traits> field, Msg<Traits>& m
 }
 
 template <typename Traits>
-absl::Status ParseMapOfEnums(JsonLexer& lex, Field<Traits> field, Msg<Traits>& msg) {
+absl::Status ParseMapOfEnumsWithIgnoringUnknownFields(JsonLexer& lex, Field<Traits> map_field, Msg<Traits>& msg) {
   if (lex.Peek(JsonLexer::kNull)) {
     return lex.Expect("null");
   }
@@ -753,23 +752,58 @@ absl::Status ParseMapOfEnums(JsonLexer& lex, Field<Traits> field, Msg<Traits>& m
               key.value.AsView()));
         }
 
-        return Traits::NewMsg(
-            field, msg,
-            [&](const Desc<Traits>& type, Msg<Traits>& entry) -> absl::Status {
-              RETURN_IF_ERROR(ParseMapKey<Traits>(lex, field, type, key, entry));
-
-              return ParseSingular<Traits>(lex, Traits::ValueField(type),
-                                           entry);
+        absl::StatusOr<JsonLexer::Kind> kind = lex.PeekKind();
+        RETURN_IF_ERROR(kind.status());
+        switch (*kind) {
+          // This is a string enum value. If the value is unknown, we shouldn't emit a
+          // new map entry message.
+          case JsonLexer::kStr: {
+            // Parse the enum value from string, advancing the lexer.
+            // Note that the key is already parsed in 'key'.
+            // If enum value is unknown, we'll get a {nullopt} here.
+            absl::StatusOr<absl::optional<int32_t>> enum_value;
+            (void)Traits::WithFieldType(map_field, [&lex, &enum_value](const Desc<Traits>& map_entry_desc) {
+              enum_value = ParseEnum<Traits>(lex, Traits::ValueField(map_entry_desc));
+              return absl::OkStatus();
             });
+            RETURN_IF_ERROR(enum_value.status());
+
+            if (enum_value->has_value()) {
+              return Traits::NewMsg(
+                  map_field, msg,
+                  [&](const Desc<Traits>& map_entry_type, Msg<Traits>& map_entry) -> absl::Status {
+                    RETURN_IF_ERROR(ParseMapKey<Traits>(lex.options(), map_field, map_entry_type, map_entry, key));
+
+                    Traits::SetEnum(
+                      Traits::ValueField(map_entry_type),
+                      map_entry,
+                      enum_value->value_or(0));
+
+                    return absl::OkStatus();
+                  });
+            } else {
+              return absl::OkStatus();
+            }
+          }
+          default: {
+            // For numeric enum values, we fall back to original implementation.
+            return Traits::NewMsg(
+                map_field, msg,
+                [&](const Desc<Traits>& map_entry_type, Msg<Traits>& map_entry) -> absl::Status {
+                  RETURN_IF_ERROR(ParseMapKey<Traits>(lex.options(), map_field, map_entry_type, map_entry, key));
+                  return ParseSingular<Traits>(lex, Traits::ValueField(map_entry_type), map_entry);
+                });
+          }
+        }
       });
 }
 
 template <typename Traits>
 absl::Status ParseMap(JsonLexer& lex, Field<Traits> field, Msg<Traits>& msg) {
-  if (Traits::IsMapOfEnums(field)) {
-    return ParseMapOfEnums<Traits>(lex, field, msg);
+  if (Traits::IsMapOfEnums(field) && lex.options().ignore_unknown_fields) {
+    return ParseMapOfEnumsWithIgnoringUnknownFields<Traits>(lex, field, msg);
   } else {
-    return ParseMapDefault<Traits>(lex, field, msg);
+    return ParseMapImpl<Traits>(lex, field, msg);
   }
 }
 

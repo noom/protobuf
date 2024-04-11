@@ -11,10 +11,15 @@ Debug output:
 std::cerr << "bok\n";
 ```
 
+Conformance:
+```
+bazel test //src:conformance_test
+```
+
 - DONE write unit test which uses map of enums
 - DONE detect map of enums and invoke a different impl for parsemap
+- DONE don't take the whole lex in ParseEnumFromStr, only options.
 - implement ParseMapOfEnums
-- don't take the whole lex in ParseEnumFromStr, only options.
 - ParseMapKey shouldn't take lex
 
 Protocol Buffers - Google's data interchange format
